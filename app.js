@@ -6,13 +6,14 @@
 // STEP 1: PASTE YOUR FIREBASE CONFIG HERE
 // ==========================================
 const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyBFgvHS8bfkFfQ2m7gVcfNEsvtPYnmNEFQ",
+  authDomain: "sharet-497af.firebaseapp.com",
+  projectId: "sharet-497af",
+  storageBucket: "sharet-497af.firebasestorage.app",
+  messagingSenderId: "484016234965",
+  appId: "1:484016234965:web:7774b44d4663d265e15d5c"
 };
+
 
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
