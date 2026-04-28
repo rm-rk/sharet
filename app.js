@@ -14,10 +14,177 @@ const firebaseConfig = {
   appId: "1:484016234965:web:7774b44d4663d265e15d5c"
 };
 
-
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+
+// ==========================================
+// Gamification Engine
+// ==========================================
+const GAME_KEY = 'sharet_game_state';
+const XP_PER_SHARE = 100;
+const BASE_XP_REQUIREMENT = 300;
+
+const ACHIEVEMENTS = [
+  { id: 'first_blood', name: 'First Blood', desc: 'Share your first network', icon: '🩸', condition: (s, d) => s.networksShared >= 1 },
+  { id: 'community_builder', name: 'Community Builder', desc: 'Share 5 networks', icon: '🏗️', condition: (s, d) => s.networksShared >= 5 },
+  { id: 'network_guru', name: 'Network Guru', desc: 'Share 10 networks', icon: '👑', condition: (s, d) => s.networksShared >= 10 },
+  { id: 'security_expert', name: 'Security Expert', desc: 'Share a strong password (8+ chars)', icon: '🛡️', condition: (s, d) => d.password && d.password.length >= 8 },
+  { id: 'speed_demon', name: 'Speed Demon', desc: 'Share within 30 seconds', icon: '⚡', condition: (s, d) => d.shareTime && d.shareTime < 30000 },
+  { id: 'generous_soul', name: 'Generous Soul', desc: 'Share 3 networks in one day', icon: '💎', condition: (s, d) => s.shareTimes && s.shareTimes.filter(t => isSameDay(t, Date.now())).length >= 3 }
+];
+
+function isSameDay(a, b) {
+  const d1 = new Date(a);
+  const d2 = new Date(b);
+  return d1.getDate() === d2.getDate() && d1.getMonth() === d2.getMonth() && d1.getFullYear() === d2.getFullYear();
+}
+
+function getGameState() {
+  const raw = localStorage.getItem(GAME_KEY);
+  if (raw) return JSON.parse(raw);
+  return { xp: 0, level: 1, networksShared: 0, achievements: [], streak: 1, lastShareDate: null, shareTimes: [], totalShared: 0 };
+}
+
+function saveGameState(state) {
+  localStorage.setItem(GAME_KEY, JSON.stringify(state));
+}
+
+function getXPRequired(level) {
+  return BASE_XP_REQUIREMENT + (level - 1) * 150;
+}
+
+function addXP(amount) {
+  const state = getGameState();
+  state.xp += amount;
+  let leveledUp = false;
+  let newLevel = state.level;
+  while (state.xp >= getXPRequired(state.level)) {
+    state.xp -= getXPRequired(state.level);
+    state.level++;
+    leveledUp = true;
+    newLevel = state.level;
+  }
+  saveGameState(state);
+  return { leveledUp, newLevel, xp: state.xp, required: getXPRequired(state.level) };
+}
+
+function recordShare(data) {
+  const state = getGameState();
+  state.networksShared++;
+  state.totalShared++;
+  const now = Date.now();
+  state.shareTimes.push(now);
+  // Keep only last 30 days
+  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+  state.shareTimes = state.shareTimes.filter(t => t > thirtyDaysAgo);
+  
+  // Streak logic
+  if (state.lastShareDate) {
+    const last = new Date(state.lastShareDate);
+    const today = new Date(now);
+    const diff = Math.floor((today - last) / (1000 * 60 * 60 * 24));
+    if (diff === 1) state.streak++;
+    else if (diff > 1) state.streak = 1;
+  }
+  state.lastShareDate = now;
+  
+  saveGameState(state);
+  
+  // Check achievements
+  const unlocked = [];
+  ACHIEVEMENTS.forEach(ach => {
+    if (!state.achievements.includes(ach.id) && ach.condition(state, data)) {
+      state.achievements.push(ach.id);
+      unlocked.push(ach);
+    }
+  });
+  if (unlocked.length) saveGameState(state);
+  
+  return { state, unlocked };
+}
+
+function getRarity(ssid, password) {
+  const seed = (ssid.length + password.length + (ssid.charCodeAt(0) || 0)) * 9301 + 49297;
+  const score = (seed % 233280) / 233280;
+  if (score > 0.95) return { name: 'LEGENDARY', color: '#f59e0b', glow: 'rgba(245, 158, 11, 0.25)', class: 'legendary' };
+  if (score > 0.80) return { name: 'EPIC', color: '#a855f7', glow: 'rgba(168, 85, 247, 0.25)', class: 'epic' };
+  if (score > 0.55) return { name: 'RARE', color: '#3b82f6', glow: 'rgba(59, 130, 246, 0.2)', class: 'rare' };
+  return { name: 'COMMON', color: '#64748b', glow: 'rgba(100, 116, 139, 0.1)', class: 'common' };
+}
+
+function renderHUD(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const state = getGameState();
+  const required = getXPRequired(state.level);
+  const pct = Math.min(100, (state.xp / required) * 100);
+  
+  container.innerHTML = `
+    <div class="hud-stats">
+      <div class="hud-badge">
+        <div class="level-ring" style="--progress: ${pct}">
+          <span class="level-num">${state.level}</span>
+        </div>
+        <span class="level-label">LVL</span>
+      </div>
+      <div class="hud-info">
+        <div class="xp-bar-container">
+          <div class="xp-bar-track">
+            <div class="xp-bar-fill" style="width: ${pct}%"></div>
+          </div>
+          <span class="xp-text">${state.xp} / ${required} XP</span>
+        </div>
+        <div class="hud-meta">
+          <span class="meta-item">🔥 ${state.streak} day streak</span>
+          <span class="meta-item">📡 ${state.networksShared} shared</span>
+          <span class="meta-item">🏆 ${state.achievements.length}/${ACHIEVEMENTS.length}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function showToast(message, type = 'info') {
+  const existing = document.querySelector('.game-toast');
+  if (existing) existing.remove();
+  
+  const toast = document.createElement('div');
+  toast.className = `game-toast ${type}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 400);
+  }, 2500);
+}
+
+function showAchievementToast(ach) {
+  const toast = document.createElement('div');
+  toast.className = 'achievement-toast';
+  toast.innerHTML = `
+    <div class="ach-icon">${ach.icon}</div>
+    <div class="ach-info">
+      <div class="ach-title">Achievement Unlocked!</div>
+      <div class="ach-name">${ach.name}</div>
+      <div class="ach-desc">${ach.desc}</div>
+    </div>
+  `;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 500);
+  }, 4000);
+}
+
+// Prevent XSS in displayed SSID/password
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
 
 // ==========================================
 // Access Control (LocalStorage)
@@ -46,6 +213,8 @@ if ((page === 'home' || page === 'thankyou') && !hasSubmitted()) {
 // Entry Page Logic (index.html)
 // ==========================================
 if (page === 'entry') {
+    renderHUD('entryHud');
+    
     const form = document.getElementById('wifiForm');
     const ssidInput = document.getElementById('ssid');
     const passwordInput = document.getElementById('password');
@@ -53,6 +222,7 @@ if (page === 'entry') {
     const submitBtn = document.getElementById('submitBtn');
     const btnText = submitBtn.querySelector('.btn-text');
     const btnLoader = submitBtn.querySelector('.btn-loader');
+    const pageLoadTime = Date.now();
 
     // Password visibility toggles
     setupToggle('togglePassword', 'password');
@@ -120,15 +290,26 @@ if (page === 'entry') {
         setLoading(true);
 
         try {
-            // Save to Firestore
+            // Save to Firestore (EXACT same structure)
             await db.collection('wifiShares').add({
                 ssid: ssid,
                 password: password,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
 
+            // Gamification hooks
+            const shareTime = Date.now() - pageLoadTime;
+            const xpResult = addXP(XP_PER_SHARE);
+            const shareData = { password, shareTime };
+            const { unlocked } = recordShare(shareData);
+
             // Mark as submitted
             setSubmitted();
+
+            // Store temp data for thank you page
+            sessionStorage.setItem('sharet_last_xp', XP_PER_SHARE);
+            sessionStorage.setItem('sharet_leveled_up', xpResult.leveledUp ? xpResult.newLevel : '');
+            sessionStorage.setItem('sharet_new_achievements', JSON.stringify(unlocked));
 
             // Redirect to thank you page
             window.location.href = 'thankyou.html';
@@ -167,6 +348,8 @@ if (page === 'entry') {
 // Home Page Logic (home.html)
 // ==========================================
 if (page === 'home') {
+    renderHUD('homeHud');
+    
     const wifiList = document.getElementById('wifiList');
     const loadingState = document.getElementById('loadingState');
     const emptyState = document.getElementById('emptyState');
@@ -198,11 +381,15 @@ if (page === 'home') {
     }
 
     function createWifiCard(id, ssid, password) {
+        const rarity = getRarity(ssid, password);
         const card = document.createElement('div');
-        card.className = 'wifi-card';
+        card.className = `wifi-card rarity-${rarity.class}`;
         card.dataset.revealed = 'false';
+        card.style.setProperty('--rarity-color', rarity.color);
+        card.style.setProperty('--rarity-glow', rarity.glow);
 
         card.innerHTML = `
+            <div class="rarity-badge" style="color: ${rarity.color}; border-color: ${rarity.color}">${rarity.name}</div>
             <div class="card-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
@@ -219,10 +406,18 @@ if (page === 'home') {
                 </div>
                 <p class="reveal-hint" id="hint-${id}">Tap to reveal password</p>
             </div>
+            <button class="copy-btn" id="copy-${id}" aria-label="Copy password">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+            </button>
         `;
 
         // Tap to reveal
-        card.addEventListener('click', () => {
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.copy-btn')) return;
+            
             const isRevealed = card.dataset.revealed === 'true';
             const mask = document.getElementById(`mask-${id}`);
             const pass = document.getElementById(`pass-${id}`);
@@ -231,7 +426,7 @@ if (page === 'home') {
             if (!isRevealed) {
                 mask.classList.add('hidden');
                 pass.classList.add('revealed');
-                hint.textContent = 'Tap to hide';
+                hint.textContent = 'Tap to hide password';
                 card.dataset.revealed = 'true';
             } else {
                 mask.classList.remove('hidden');
@@ -241,14 +436,24 @@ if (page === 'home') {
             }
         });
 
-        return card;
-    }
+        // Copy button
+        const copyBtn = card.querySelector(`#copy-${id}`);
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(password).then(() => {
+                copyBtn.classList.add('copied');
+                copyBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>`;
+                showToast('Password copied to clipboard!', 'success');
+                setTimeout(() => {
+                    copyBtn.classList.remove('copied');
+                    copyBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+                }, 2000);
+            }).catch(() => {
+                showToast('Failed to copy', 'error');
+            });
+        });
 
-    // Prevent XSS in displayed SSID/password
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return card;
     }
 
     // Load on page open
@@ -265,17 +470,17 @@ if (page === 'thankyou') {
 
     // Generate CSS particle burst
     function createParticles() {
-        const colors = ['#8b5cf6', '#6366f1', '#a78bfa', '#34d399', '#f472b6', '#60a5fa'];
+        const colors = ['#8b5cf6', '#6366f1', '#a78bfa', '#34d399', '#f472b6', '#60a5fa', '#f59e0b', '#22d3ee'];
         
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < 40; i++) {
             const particle = document.createElement('div');
             particle.className = 'particle';
             
-            const angle = (i / 30) * Math.PI * 2;
-            const distance = 60 + Math.random() * 80;
+            const angle = (i / 40) * Math.PI * 2;
+            const distance = 60 + Math.random() * 120;
             const color = colors[Math.floor(Math.random() * colors.length)];
-            const delay = Math.random() * 0.3;
-            const size = 4 + Math.random() * 4;
+            const delay = Math.random() * 0.4;
+            const size = 4 + Math.random() * 6;
 
             particle.style.cssText = `
                 --angle: ${angle}rad;
@@ -284,6 +489,7 @@ if (page === 'thankyou') {
                 width: ${size}px;
                 height: ${size}px;
                 animation-delay: ${delay}s;
+                box-shadow: 0 0 ${size * 2}px ${color};
             `;
 
             burstContainer.appendChild(particle);
@@ -291,6 +497,30 @@ if (page === 'thankyou') {
     }
 
     createParticles();
+
+    // Gamification overlay
+    const xpGained = parseInt(sessionStorage.getItem('sharet_last_xp') || '0');
+    const newLevel = sessionStorage.getItem('sharet_leveled_up');
+    const newAch = JSON.parse(sessionStorage.getItem('sharet_new_achievements') || '[]');
+    
+    const gameOverlay = document.createElement('div');
+    gameOverlay.className = 'game-overlay';
+    let overlayHtml = '';
+    if (xpGained > 0) {
+        overlayHtml += `<div class="xp-popup">+${xpGained} XP</div>`;
+    }
+    if (newLevel) {
+        overlayHtml += `<div class="levelup-banner">LEVEL UP! LVL ${newLevel}</div>`;
+    }
+    gameOverlay.innerHTML = overlayHtml;
+    if (overlayHtml) {
+        document.querySelector('.thankyou-content').appendChild(gameOverlay);
+    }
+    
+    // Show achievement toasts with stagger
+    newAch.forEach((ach, i) => {
+        setTimeout(() => showAchievementToast(ach), 1000 + i * 700);
+    });
 
     // Auto-redirect countdown
     const countdown = setInterval(() => {
