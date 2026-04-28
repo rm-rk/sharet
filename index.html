@@ -5,12 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Sharet - Unlock Community Access</title>
     <link rel="stylesheet" href="style.css">
-    <!-- Firebase v9 Compat (easiest for beginners) -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 </head>
 <body data-page="entry">
+    <!-- Cyber Background -->
+    <div class="bg-cyber">
+        <div class="bg-grid"></div>
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+    <div class="scanlines"></div>
+
     <div class="app-container">
+        <!-- Gamification HUD -->
+        <div id="entryHud" class="hud-container"></div>
+
         <div class="entry-content">
             <!-- Logo Section -->
             <div class="logo-section">
@@ -50,7 +61,6 @@
                             required
                         >
                         <button type="button" class="toggle-btn" id="togglePassword" aria-label="Toggle password visibility">
-                            <!-- Eye Icon -->
                             <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                                 <circle cx="12" cy="12" r="3"/>
@@ -76,7 +86,7 @@
                             </svg>
                         </button>
                     </div>
-                    <span class="error-msg" id="confirmError"></span>
+                    <span class="error-msg" id="confirmPasswordError"></span>
                 </div>
 
                 <button type="submit" class="btn-primary" id="submitBtn">
