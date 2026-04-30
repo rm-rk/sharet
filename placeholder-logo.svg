@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sharet - Community Networks</title>
+    <meta name="description" content="Discover and connect to community Wi-Fi networks.">
+    <meta name="theme-color" content="#0d0a0e">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+</head>
+<body data-page="home">
+    <!-- Premium Cyber Background -->
+    <div class="bg-cyber">
+        <div class="bg-grid"></div>
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+    <div class="scanlines"></div>
+
+    <div class="app-container">
+        <!-- Gamification HUD -->
+        <div id="homeHud" class="hud-container"></div>
+
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-brand">
+                <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                    <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                    <line x1="12" y1="20" x2="12.01" y2="20"/>
+                </svg>
+                <h1>Sharet</h1>
+            </div>
+            <p class="header-subtitle">Community Wi-Fi Networks</p>
+        </header>
+
+        <!-- Wi-Fi List -->
+        <main class="wifi-list" id="wifiList">
+            <div class="loading-state" id="loadingState">
+                <div class="spinner"></div>
+                <p>Discovering networks...</p>
+            </div>
+            <div class="empty-state hidden" id="emptyState">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="56" height="56">
+                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                    <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                    <line x1="12" y1="20" x2="12.01" y2="20"/>
+                </svg>
+                <p>No networks shared yet.<br>Be the first to contribute!</p>
+            </div>
+        </main>
+
+        <!-- Premium Floating Action Button -->
+        <a href="index.html" class="fab" aria-label="Share your Wi-Fi">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            <span>Share Wi-Fi</span>
+        </a>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

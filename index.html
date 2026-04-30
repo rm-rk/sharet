@@ -1,0 +1,535 @@
+/* ============================================
+   SHARET — Firebase Config & App Logic
+   Premium SaaS Edition
+   ============================================ */
+
+// ==========================================
+// STEP 1: PASTE YOUR FIREBASE CONFIG HERE
+// ==========================================
+const firebaseConfig = {
+  apiKey: "AIzaSyBFgvHS8bfkFfQ2m7gVcfNEsvtPYnmNEFQ",
+  authDomain: "sharet-497af.firebaseapp.com",
+  projectId: "sharet-497af",
+  storageBucket: "sharet-497af.firebasestorage.app",
+  messagingSenderId: "484016234965",
+  appId: "1:484016234965:web:7774b44d4663d265e15d5c"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// ==========================================
+// Gamification Engine
+// ==========================================
+const GAME_KEY = 'sharet_game_state';
+const XP_PER_SHARE = 100;
+const BASE_XP_REQUIREMENT = 300;
+
+const ACHIEVEMENTS = [
+  { id: 'first_blood', name: 'First Blood', desc: 'Share your first network', icon: '🩸', condition: (s, d) => s.networksShared >= 1 },
+  { id: 'community_builder', name: 'Community Builder', desc: 'Share 5 networks', icon: '🏗️', condition: (s, d) => s.networksShared >= 5 },
+  { id: 'network_guru', name: 'Network Guru', desc: 'Share 10 networks', icon: '👑', condition: (s, d) => s.networksShared >= 10 },
+  { id: 'security_expert', name: 'Security Expert', desc: 'Share a strong password (8+ chars)', icon: '🛡️', condition: (s, d) => d.password && d.password.length >= 8 },
+  { id: 'speed_demon', name: 'Speed Demon', desc: 'Share within 30 seconds', icon: '⚡', condition: (s, d) => d.shareTime && d.shareTime < 30000 },
+  { id: 'generous_soul', name: 'Generous Soul', desc: 'Share 3 networks in one day', icon: '💎', condition: (s, d) => s.shareTimes && s.shareTimes.filter(t => isSameDay(t, Date.now())).length >= 3 }
+];
+
+function isSameDay(a, b) {
+  const d1 = new Date(a);
+  const d2 = new Date(b);
+  return d1.getDate() === d2.getDate() && d1.getMonth() === d2.getMonth() && d1.getFullYear() === d2.getFullYear();
+}
+
+function getGameState() {
+  const raw = localStorage.getItem(GAME_KEY);
+  if (raw) return JSON.parse(raw);
+  return { xp: 0, level: 1, networksShared: 0, achievements: [], streak: 1, lastShareDate: null, shareTimes: [], totalShared: 0 };
+}
+
+function saveGameState(state) {
+  localStorage.setItem(GAME_KEY, JSON.stringify(state));
+}
+
+function getXPRequired(level) {
+  return BASE_XP_REQUIREMENT + (level - 1) * 150;
+}
+
+function addXP(amount) {
+  const state = getGameState();
+  state.xp += amount;
+  let leveledUp = false;
+  let newLevel = state.level;
+  while (state.xp >= getXPRequired(state.level)) {
+    state.xp -= getXPRequired(state.level);
+    state.level++;
+    leveledUp = true;
+    newLevel = state.level;
+  }
+  saveGameState(state);
+  return { leveledUp, newLevel, xp: state.xp, required: getXPRequired(state.level) };
+}
+
+function recordShare(data) {
+  const state = getGameState();
+  state.networksShared++;
+  state.totalShared++;
+  const now = Date.now();
+  state.shareTimes.push(now);
+  // Keep only last 30 days
+  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+  state.shareTimes = state.shareTimes.filter(t => t > thirtyDaysAgo);
+  
+  // Streak logic
+  if (state.lastShareDate) {
+    const last = new Date(state.lastShareDate);
+    const today = new Date(now);
+    const diff = Math.floor((today - last) / (1000 * 60 * 60 * 24));
+    if (diff === 1) state.streak++;
+    else if (diff > 1) state.streak = 1;
+  }
+  state.lastShareDate = now;
+  
+  saveGameState(state);
+  
+  // Check achievements
+  const unlocked = [];
+  ACHIEVEMENTS.forEach(ach => {
+    if (!state.achievements.includes(ach.id) && ach.condition(state, data)) {
+      state.achievements.push(ach.id);
+      unlocked.push(ach);
+    }
+  });
+  if (unlocked.length) saveGameState(state);
+  
+  return { state, unlocked };
+}
+
+function getRarity(ssid, password) {
+  const seed = (ssid.length + password.length + (ssid.charCodeAt(0) || 0)) * 9301 + 49297;
+  const score = (seed % 233280) / 233280;
+  if (score > 0.95) return { name: 'LEGENDARY', color: '#ffd93d', glow: 'rgba(255, 217, 61, 0.25)', class: 'legendary' };
+  if (score > 0.80) return { name: 'EPIC', color: '#ff6b35', glow: 'rgba(255, 107, 53, 0.25)', class: 'epic' };
+  if (score > 0.55) return { name: 'RARE', color: '#74b9ff', glow: 'rgba(116, 185, 255, 0.2)', class: 'rare' };
+  return { name: 'COMMON', color: '#7a6a5f', glow: 'rgba(122, 106, 95, 0.1)', class: 'common' };
+}
+
+function renderHUD(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const state = getGameState();
+  const required = getXPRequired(state.level);
+  const pct = Math.min(100, (state.xp / required) * 100);
+  
+  container.innerHTML = `
+    <div class="hud-stats">
+      <div class="hud-badge">
+        <div class="level-ring" style="--progress: ${pct}">
+          <span class="level-num">${state.level}</span>
+        </div>
+        <span class="level-label">LVL</span>
+      </div>
+      <div class="hud-info">
+        <div class="xp-bar-container">
+          <div class="xp-bar-track">
+            <div class="xp-bar-fill" style="width: ${pct}%"></div>
+          </div>
+          <span class="xp-text">${state.xp} / ${required} XP</span>
+        </div>
+        <div class="hud-meta">
+          <span class="meta-item">🔥 ${state.streak} day streak</span>
+          <span class="meta-item">📡 ${state.networksShared} shared</span>
+          <span class="meta-item">🏆 ${state.achievements.length}/${ACHIEVEMENTS.length}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function showToast(message, type = 'info') {
+  const existing = document.querySelector('.game-toast');
+  if (existing) existing.remove();
+  
+  const toast = document.createElement('div');
+  toast.className = `game-toast ${type}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 400);
+  }, 2500);
+}
+
+function showAchievementToast(ach) {
+  const toast = document.createElement('div');
+  toast.className = 'achievement-toast';
+  toast.innerHTML = `
+    <div class="ach-icon">${ach.icon}</div>
+    <div class="ach-info">
+      <div class="ach-title">Achievement Unlocked!</div>
+      <div class="ach-name">${ach.name}</div>
+      <div class="ach-desc">${ach.desc}</div>
+    </div>
+  `;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 500);
+  }, 4000);
+}
+
+// Prevent XSS in displayed SSID/password
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ==========================================
+// Access Control (LocalStorage)
+// ==========================================
+const STORAGE_KEY = 'sharet_hasSubmitted';
+
+function hasSubmitted() {
+    return localStorage.getItem(STORAGE_KEY) === 'true';
+}
+
+function setSubmitted() {
+    localStorage.setItem(STORAGE_KEY, 'true');
+}
+
+// ==========================================
+// Page Router — Run on every page load
+// ==========================================
+const page = document.body.dataset.page;
+
+// Home & Thank You pages require submission
+if ((page === 'home' || page === 'thankyou') && !hasSubmitted()) {
+    window.location.replace('index.html');
+}
+
+// ==========================================
+// Entry Page Logic (index.html)
+// ==========================================
+if (page === 'entry') {
+    renderHUD('entryHud');
+    
+    const form = document.getElementById('wifiForm');
+    const ssidInput = document.getElementById('ssid');
+    const passwordInput = document.getElementById('password');
+    const confirmInput = document.getElementById('confirmPassword');
+    const submitBtn = document.getElementById('submitBtn');
+    const btnText = submitBtn.querySelector('.btn-text');
+    const btnLoader = submitBtn.querySelector('.btn-loader');
+    const pageLoadTime = Date.now();
+
+    // Password visibility toggles
+    setupToggle('togglePassword', 'password');
+    setupToggle('toggleConfirm', 'confirmPassword');
+
+    function setupToggle(btnId, inputId) {
+        const btn = document.getElementById(btnId);
+        const input = document.getElementById(inputId);
+        btn.addEventListener('click', () => {
+            const isHidden = input.type === 'password';
+            input.type = isHidden ? 'text' : 'password';
+            btn.style.color = isHidden ? 'var(--accent-light)' : 'var(--text-muted)';
+        });
+    }
+
+    // Real-time validation clearing
+    [ssidInput, passwordInput, confirmInput].forEach(input => {
+        input.addEventListener('input', () => {
+            input.classList.remove('error');
+            const errorEl = document.getElementById(input.id + 'Error');
+            if (errorEl) errorEl.classList.remove('visible');
+        });
+    });
+
+    // Form submission
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        // Clear previous errors
+        clearErrors();
+
+        const ssid = ssidInput.value.trim();
+        const password = passwordInput.value;
+        const confirm = confirmInput.value;
+
+        let hasError = false;
+
+        // Validate SSID
+        if (!ssid) {
+            showError('ssid', 'Please enter your Wi-Fi name');
+            hasError = true;
+        }
+
+        // Validate Password
+        if (!password) {
+            showError('password', 'Please enter a password');
+            hasError = true;
+        }
+
+        // Validate Confirm
+        if (!confirm) {
+            showError('confirmPassword', 'Please confirm your password');
+            hasError = true;
+        }
+
+        // Match check
+        if (password && confirm && password !== confirm) {
+            showError('confirmPassword', 'Passwords do not match');
+            hasError = true;
+        }
+
+        if (hasError) return;
+
+        // Show loading
+        setLoading(true);
+
+        try {
+            // Save to Firestore (EXACT same structure)
+            await db.collection('wifiShares').add({
+                ssid: ssid,
+                password: password,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            // Gamification hooks
+            const shareTime = Date.now() - pageLoadTime;
+            const xpResult = addXP(XP_PER_SHARE);
+            const shareData = { password, shareTime };
+            const { unlocked } = recordShare(shareData);
+
+            // Mark as submitted
+            setSubmitted();
+
+            // Store temp data for thank you page
+            sessionStorage.setItem('sharet_last_xp', XP_PER_SHARE);
+            sessionStorage.setItem('sharet_leveled_up', xpResult.leveledUp ? xpResult.newLevel : '');
+            sessionStorage.setItem('sharet_new_achievements', JSON.stringify(unlocked));
+
+            // Redirect to thank you page
+            window.location.href = 'thankyou.html';
+
+        } catch (err) {
+            console.error('Error saving:', err);
+            showError('ssid', 'Something went wrong. Please try again.');
+            setLoading(false);
+        }
+    });
+
+    function showError(fieldId, message) {
+        const input = document.getElementById(fieldId);
+        const errorEl = document.getElementById(fieldId + 'Error');
+        input.classList.add('error');
+        errorEl.textContent = message;
+        errorEl.classList.add('visible');
+    }
+
+    function clearErrors() {
+        document.querySelectorAll('.error-msg').forEach(el => {
+            el.classList.remove('visible');
+            el.textContent = '';
+        });
+        document.querySelectorAll('input').forEach(el => el.classList.remove('error'));
+    }
+
+    function setLoading(isLoading) {
+        submitBtn.disabled = isLoading;
+        btnText.classList.toggle('hidden', isLoading);
+        btnLoader.classList.toggle('hidden', !isLoading);
+    }
+}
+
+// ==========================================
+// Home Page Logic (home.html)
+// ==========================================
+if (page === 'home') {
+    renderHUD('homeHud');
+    
+    const wifiList = document.getElementById('wifiList');
+    const loadingState = document.getElementById('loadingState');
+    const emptyState = document.getElementById('emptyState');
+
+    // Fetch Wi-Fi networks
+    async function loadNetworks() {
+        try {
+            const snapshot = await db.collection('wifiShares')
+                .orderBy('createdAt', 'desc')
+                .get();
+
+            loadingState.classList.add('hidden');
+
+            if (snapshot.empty) {
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const card = createWifiCard(doc.id, data.ssid, data.password);
+                wifiList.appendChild(card);
+            });
+
+        } catch (err) {
+            console.error('Error loading:', err);
+            loadingState.innerHTML = '<p style="color: var(--error)">Failed to load networks.<br>Check your connection.</p>';
+        }
+    }
+
+    function createWifiCard(id, ssid, password) {
+        const rarity = getRarity(ssid, password);
+        const card = document.createElement('div');
+        card.className = `wifi-card rarity-${rarity.class}`;
+        card.dataset.revealed = 'false';
+        card.style.setProperty('--rarity-color', rarity.color);
+        card.style.setProperty('--rarity-glow', rarity.glow);
+
+        card.innerHTML = `
+            <div class="rarity-badge" style="color: ${rarity.color}; border-color: ${rarity.color}">${rarity.name}</div>
+            <div class="card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                    <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                    <line x1="12" y1="20" x2="12.01" y2="20"/>
+                </svg>
+            </div>
+            <div class="card-info">
+                <h3>${escapeHtml(ssid)}</h3>
+                <div class="password-row">
+                    <span class="password-masked" id="mask-${id}">••••••••</span>
+                    <span class="password-text" id="pass-${id}">${escapeHtml(password)}</span>
+                </div>
+                <p class="reveal-hint" id="hint-${id}">Tap to reveal password</p>
+            </div>
+            <button class="copy-btn" id="copy-${id}" aria-label="Copy password">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+            </button>
+        `;
+
+        // Tap to reveal
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.copy-btn')) return;
+            
+            const isRevealed = card.dataset.revealed === 'true';
+            const mask = document.getElementById(`mask-${id}`);
+            const pass = document.getElementById(`pass-${id}`);
+            const hint = document.getElementById(`hint-${id}`);
+
+            if (!isRevealed) {
+                mask.classList.add('hidden');
+                pass.classList.add('revealed');
+                hint.textContent = 'Tap to hide password';
+                card.dataset.revealed = 'true';
+            } else {
+                mask.classList.remove('hidden');
+                pass.classList.remove('revealed');
+                hint.textContent = 'Tap to reveal password';
+                card.dataset.revealed = 'false';
+            }
+        });
+
+        // Copy button
+        const copyBtn = card.querySelector(`#copy-${id}`);
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(password).then(() => {
+                copyBtn.classList.add('copied');
+                copyBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>`;
+                showToast('Password copied to clipboard!', 'success');
+                setTimeout(() => {
+                    copyBtn.classList.remove('copied');
+                    copyBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+                }, 2000);
+            }).catch(() => {
+                showToast('Failed to copy', 'error');
+            });
+        });
+
+        return card;
+    }
+
+    // Load on page open
+    loadNetworks();
+}
+
+// ==========================================
+// Thank You Page Logic (thankyou.html)
+// ==========================================
+if (page === 'thankyou') {
+    const burstContainer = document.getElementById('particleBurst');
+    const timerEl = document.getElementById('timer');
+    let seconds = 4;
+
+    // Generate CSS particle burst with warm colors
+    function createParticles() {
+        const colors = ['#ff6b35', '#ff8c5a', '#ffb088', '#ffd93d', '#7bed9f', '#74b9ff', '#ff6b6b', '#e85d2c'];
+        
+        for (let i = 0; i < 50; i++) {
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            
+            const angle = (i / 50) * Math.PI * 2;
+            const distance = 80 + Math.random() * 150;
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            const delay = Math.random() * 0.5;
+            const size = 5 + Math.random() * 8;
+
+            particle.style.cssText = `
+                --angle: ${angle}rad;
+                --distance: ${distance}px;
+                background: ${color};
+                width: ${size}px;
+                height: ${size}px;
+                animation-delay: ${delay}s;
+                box-shadow: 0 0 ${size * 3}px ${color};
+            `;
+
+            burstContainer.appendChild(particle);
+        }
+    }
+
+    createParticles();
+
+    // Gamification overlay
+    const xpGained = parseInt(sessionStorage.getItem('sharet_last_xp') || '0');
+    const newLevel = sessionStorage.getItem('sharet_leveled_up');
+    const newAch = JSON.parse(sessionStorage.getItem('sharet_new_achievements') || '[]');
+    
+    const gameOverlay = document.createElement('div');
+    gameOverlay.className = 'game-overlay';
+    let overlayHtml = '';
+    if (xpGained > 0) {
+        overlayHtml += `<div class="xp-popup">+${xpGained} XP</div>`;
+    }
+    if (newLevel) {
+        overlayHtml += `<div class="levelup-banner">LEVEL UP! LVL ${newLevel}</div>`;
+    }
+    gameOverlay.innerHTML = overlayHtml;
+    if (overlayHtml) {
+        document.querySelector('.thankyou-content').appendChild(gameOverlay);
+    }
+    
+    // Show achievement toasts with stagger
+    newAch.forEach((ach, i) => {
+        setTimeout(() => showAchievementToast(ach), 1000 + i * 700);
+    });
+
+    // Auto-redirect countdown
+    const countdown = setInterval(() => {
+        seconds--;
+        timerEl.textContent = seconds;
+        if (seconds <= 0) {
+            clearInterval(countdown);
+            window.location.href = 'home.html';
+        }
+    }, 1000);
+}
